@@ -5,11 +5,11 @@ import math
 import copy
 import os
 
-# --- Global Constants (same as before) ---
+# --- Global Constants ---
 TILE_SIZE = 40
 GRID_WIDTH, GRID_HEIGHT = 50, 50
-WORLD_WIDTH = TILE_SIZE * GRID_WIDTH   # 2000 pixels wide
-WORLD_HEIGHT = TILE_SIZE * GRID_HEIGHT   # 2000 pixels tall
+WORLD_WIDTH = TILE_SIZE * GRID_WIDTH
+WORLD_HEIGHT = TILE_SIZE * GRID_HEIGHT
 
 GAME_VIEW_WIDTH, GAME_VIEW_HEIGHT = 600, 600
 SIDEBAR_WIDTH, SIDEBAR_HEIGHT = 200, 600
@@ -17,7 +17,7 @@ SCREEN_WIDTH, SCREEN_HEIGHT = GAME_VIEW_WIDTH + SIDEBAR_WIDTH, 600
 
 FPS = 60
 
-# Colors (for UI and debug outlines)
+# Colors (for UI and fallback)
 WHITE      = (255, 255, 255)
 BLACK      = (0, 0, 0)
 RED        = (255, 0, 0)
@@ -30,7 +30,7 @@ YELLOW     = (255, 255, 0)
 GRAY       = (128, 128, 128)
 DARK_GRAY  = (30, 30, 30)
 
-# --- Base Stats & Costs (same as before) ---
+# --- Base Stats & Costs ---
 BASE_WIZARD_CONFIG = {
     "max_mana": 100,
     "max_ap": 5,
@@ -39,9 +39,10 @@ BASE_WIZARD_CONFIG = {
 }
 WIZARD_SPEED = 3
 
+# Existing ally types plus new ones:
 ALLY_TYPES = {
     "Imp": {
-         "color": ORANGE,  # no longer used for drawing, now we use images
+         "color": ORANGE,  
          "max_ap": 5,
          "hp": 10,
          "strength": 5,
@@ -69,12 +70,72 @@ ALLY_TYPES = {
          "intelligence": 4,
          "auto_roam": True,
          "mana_cost": 15
+    },
+    "Ghost": {
+         "color": (200, 200, 255),
+         "max_ap": 6,
+         "hp": 12,
+         "strength": 6,
+         "speed": 4,
+         "intelligence": 5,
+         "auto_roam": False,
+         "mana_cost": 30
+    },
+    "Demon": {
+         "color": (255, 100, 100),
+         "max_ap": 4,
+         "hp": 30,
+         "strength": 12,
+         "speed": 3,
+         "intelligence": 4,
+         "auto_roam": False,
+         "mana_cost": 50
+    },
+    "Zombie": {
+         "color": (100, 150, 100),
+         "max_ap": 4,
+         "hp": 20,
+         "strength": 8,
+         "speed": 2,
+         "intelligence": 1,
+         "auto_roam": False,
+         "mana_cost": 35
+    },
+    "Bat": {
+         "color": (50, 50, 50),
+         "max_ap": 8,
+         "hp": 6,
+         "strength": 4,
+         "speed": 8,
+         "intelligence": 2,
+         "auto_roam": True,
+         "mana_cost": 20
     }
 }
-ALLY_PURCHASE_COSTS = {"Imp": 30, "Ogre": 50, "Goblin": 25}
-UPGRADE_COSTS = {"max_mana": 20, "max_ap": 15, "strength": 25, "stamina": 25}
 
-ENEMY_STATS = {"color": RED, "max_ap": 2, "hp": 15, "strength": 5}
+ALLY_PURCHASE_COSTS = {
+    "Imp": 30,
+    "Ogre": 50,
+    "Goblin": 25,
+    "Ghost": 40,
+    "Demon": 70,
+    "Zombie": 45,
+    "Bat": 30
+}
+
+UPGRADE_COSTS = {
+    "max_mana": 20,   # +10 mana
+    "max_ap": 15,     # +1 AP
+    "strength": 25,   # +1 strength
+    "stamina": 25     # +10 HP
+}
+
+ENEMY_STATS = {
+    "color": RED,
+    "max_ap": 2,
+    "hp": 15,
+    "strength": 5
+}
 
 XP_PER_ENEMY = 10
 XP_LEVEL_BONUS = 50
@@ -89,30 +150,39 @@ def load_image(name):
     try:
         image = pygame.image.load(path)
     except Exception as e:
-        print(f"Error loading image {path}: {e}")
+        print(f"Error loading {path}: {e}")
         image = pygame.Surface((TILE_SIZE, TILE_SIZE))
         image.fill(RED)
     return image
 
+def load_anim(name):
+    return [load_image(f"{name}_0.png"), load_image(f"{name}_1.png")]
+
 def load_assets():
     assets = {}
-    def load_anim(name):
-        # Load two frames for the given animation base name.
-        return [load_image(f"{name}_0.png"), load_image(f"{name}_1.png")]
     assets["wizard"] = load_anim("wizard")
     assets["imp"] = load_anim("imp")
     assets["ogre"] = load_anim("ogre")
     assets["goblin"] = load_anim("goblin")
+    assets["ghost"] = load_anim("ghost")
+    assets["demon"] = load_anim("demon")
+    assets["zombie"] = load_anim("zombie")
+    assets["bat"] = load_anim("bat")
     assets["enemy"] = load_anim("enemy")
     assets["grass_tile"] = load_image("grass_tile.png")
     assets["tree_tile"] = load_image("tree_tile.png")
     assets["building_tile"] = load_image("building_tile.png")
     assets["swamp_tile"] = load_image("swamp_tile.png")
+    assets["wall_tile"] = load_image("wall_tile.png")
+    assets["floor_tile"] = load_image("floor_tile.png")
+    assets["door_tile"] = load_image("door_tile.png")
+    assets["chest_closed"] = load_image("chest_closed.png")
+    assets["chest_open"] = load_image("chest_open.png")
     return assets
 
 ASSETS = load_assets()
 
-# --- Helper Functions (same as before) ---
+# --- Helper Functions ---
 def is_tile_walkable(x, y, obstacles):
     if x < 0 or x >= GRID_WIDTH or y < 0 or y >= GRID_HEIGHT:
         return False
@@ -151,23 +221,75 @@ def get_line(x0, y0, x1, y1):
     return points
 
 def line_of_sight(x0, y0, x1, y1, obstacles):
-    line = get_line(x0, y0, x1, y1)
-    for (x, y) in line:
+    for (x, y) in get_line(x0, y0, x1, y1):
         for obs in obstacles:
             if (x >= obs.grid_x and x < obs.grid_x + obs.grid_width and
                 y >= obs.grid_y and y < obs.grid_y + obs.grid_height):
                 return False
     return True
 
-# --- Attack Visual Effect Class (same as before) ---
+# --- Attack Visual Effect ---
 class AttackEffect:
     def __init__(self, grid_x, grid_y):
         self.grid_x = grid_x
         self.grid_y = grid_y
         self.start_time = pygame.time.get_ticks()
-        self.duration = 200  # milliseconds
+        self.duration = 200
     def is_active(self):
         return pygame.time.get_ticks() - self.start_time < self.duration
+
+# --- Structure Class (for explorable buildings/caves) ---
+class Structure:
+    def __init__(self, grid_x, grid_y, width, height):
+        self.grid_x = grid_x
+        self.grid_y = grid_y
+        self.width = width
+        self.height = height
+        # Create a simple tile map: border = "wall", interior = "floor"
+        self.tile_map = [[ "floor" for _ in range(height)] for _ in range(width)]
+        for i in range(width):
+            self.tile_map[i][0] = "wall"
+            self.tile_map[i][height-1] = "wall"
+        for j in range(height):
+            self.tile_map[0][j] = "wall"
+            self.tile_map[width-1][j] = "wall"
+        # Place one door randomly on one border (not in a corner)
+        side = random.choice(["top", "bottom", "left", "right"])
+        if side == "top":
+            door_x = random.randint(1, width-2)
+            door_y = 0
+        elif side == "bottom":
+            door_x = random.randint(1, width-2)
+            door_y = height - 1
+        elif side == "left":
+            door_x = 0
+            door_y = random.randint(1, height-2)
+        else:
+            door_x = width - 1
+            door_y = random.randint(1, height-2)
+        self.tile_map[door_x][door_y] = "door"
+
+# --- Chest Class (interactive containers) ---
+class Chest:
+    def __init__(self, grid_x, grid_y):
+        self.grid_x = grid_x
+        self.grid_y = grid_y
+        self.locked = random.choice([True, False])
+        self.opened = False
+        possible_items = ["ruby", "gemstone", "diamond", "gold", "key"]
+        count = random.randint(1, 3)
+        self.contents = random.sample(possible_items, count)
+    def open(self, inventory):
+        if self.locked:
+            if inventory.get("key", 0) > 0:
+                inventory["key"] -= 1
+                self.opened = True
+                return self.contents
+            else:
+                return None  # Cannot open locked chest without key
+        else:
+            self.opened = True
+            return self.contents
 
 # --- Entity Classes with Animation ---
 class Wizard:
@@ -182,7 +304,6 @@ class Wizard:
         self.strength = config["strength"]
         self.speed = WIZARD_SPEED
         self.frames = ASSETS["wizard"]
-        self.color = PURPLE  # fallback
     def reset_ap(self):
         self.ap = self.max_ap
 
@@ -199,7 +320,6 @@ class Ally:
         self.speed = stats["speed"]
         self.intelligence = stats["intelligence"]
         self.auto_roam = stats["auto_roam"]
-        # Use the asset with key as the lowercase ally type
         self.frames = ASSETS[ally_type.lower()]
     def reset_ap(self):
         self.ap = self.max_ap
@@ -213,7 +333,6 @@ class Enemy:
         self.ap = ENEMY_STATS["max_ap"]
         self.strength = ENEMY_STATS["strength"]
         self.frames = ASSETS["enemy"]
-        self.color = ENEMY_STATS["color"]
     def reset_ap(self):
         self.ap = self.max_ap
 
@@ -232,9 +351,6 @@ class Portal:
         self.countdown = PORTAL_COUNTDOWN
 
 # --- Main Game Class ---
-# (For brevity, the rest of the game logic remains largely unchanged.)
-# In drawing functions, we now blit the current animation frame of each unit.
-
 class Game:
     def __init__(self):
         pygame.init()
@@ -242,10 +358,10 @@ class Game:
         pygame.display.set_caption("Turn-Based Lords of Chaos Clone")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("Arial", 16)
-        self.state = "EDITOR"
+        self.state = "EDITOR"  # or "GAME"
         self.exp = 400
         self.wizard_config = copy.deepcopy(BASE_WIZARD_CONFIG)
-        self.purchased_allies = {"Imp": 0, "Ogre": 0, "Goblin": 0}
+        self.purchased_allies = {"Imp": 0, "Ogre": 0, "Goblin": 0, "Ghost": 0, "Demon": 0, "Zombie": 0, "Bat": 0}
         self.editor_options = [
             {"name": "Max Mana (+10)", "key": "max_mana", "increment": 10, "cost": UPGRADE_COSTS["max_mana"]},
             {"name": "Max AP (+1)", "key": "max_ap", "increment": 1, "cost": UPGRADE_COSTS["max_ap"]},
@@ -254,6 +370,10 @@ class Game:
             {"name": "Buy Imp", "key": "Imp", "increment": 1, "cost": ALLY_PURCHASE_COSTS["Imp"]},
             {"name": "Buy Ogre", "key": "Ogre", "increment": 1, "cost": ALLY_PURCHASE_COSTS["Ogre"]},
             {"name": "Buy Goblin", "key": "Goblin", "increment": 1, "cost": ALLY_PURCHASE_COSTS["Goblin"]},
+            {"name": "Buy Ghost", "key": "Ghost", "increment": 1, "cost": ALLY_PURCHASE_COSTS["Ghost"]},
+            {"name": "Buy Demon", "key": "Demon", "increment": 1, "cost": ALLY_PURCHASE_COSTS["Demon"]},
+            {"name": "Buy Zombie", "key": "Zombie", "increment": 1, "cost": ALLY_PURCHASE_COSTS["Zombie"]},
+            {"name": "Buy Bat", "key": "Bat", "increment": 1, "cost": ALLY_PURCHASE_COSTS["Bat"]},
             {"name": "Start Level", "action": "start"}
         ]
         self.editor_index = 0
@@ -266,14 +386,21 @@ class Game:
         self.allowed_allies = {}
         self.enemies = []
         self.obstacles = []
+        self.structures = []  # list of Structure objects
+        self.chests = []      # list of Chest objects
         self.explored = [[False for _ in range(GRID_HEIGHT)] for _ in range(GRID_WIDTH)]
         self.current_unit_index = 0
         self.attack_effects = []
+        self.look_mode = False
+        self.look_cursor_x = 0
+        self.look_cursor_y = 0
+        self.inventory = {}  # e.g. {"key": 0, "gold": 0, ...}
         self.game_over = False
         self.game_win = False
         self.setup_world()
     
     def setup_world(self):
+        # Generate obstacles as before
         self.obstacles = []
         for _ in range(20):
             x = random.randint(0, GRID_WIDTH - 1)
@@ -287,7 +414,25 @@ class Game:
             x = random.randint(0, GRID_WIDTH - 3)
             y = random.randint(0, GRID_HEIGHT - 3)
             self.obstacles.append(Obstacle(x, y, 3, 3, "swamp"))
+        # Generate a few structures (explorable buildings/caves)
+        self.structures = []
+        for _ in range(3):
+            w = random.randint(5, 10)
+            h = random.randint(5, 10)
+            x = random.randint(0, GRID_WIDTH - w)
+            y = random.randint(0, GRID_HEIGHT - h)
+            self.structures.append(Structure(x, y, w, h))
+        # Generate some chests randomly on walkable tiles
+        self.chests = []
+        for _ in range(5):
+            while True:
+                x = random.randint(0, GRID_WIDTH - 1)
+                y = random.randint(0, GRID_HEIGHT - 1)
+                if is_tile_walkable(x, y, self.obstacles):
+                    self.chests.append(Chest(x, y))
+                    break
     
+    # --- Editor State Methods ---
     def handle_editor_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -335,6 +480,7 @@ class Game:
         self.screen.blit(instr, (50, start_y + len(self.editor_options)*25 + 20))
         pygame.display.flip()
     
+    # --- Game State Methods ---
     def start_level(self):
         self.turn_count = 0
         self.turn_limit = BASE_TURN_LIMIT + (self.level - 1) * 10
@@ -351,6 +497,7 @@ class Game:
             y = random.randint(0, GRID_HEIGHT // 2)
             self.enemies.append(Enemy(x, y))
         self.update_fog_for_unit(self.wizard)
+        self.look_mode = False  # exit look mode if it was active
     
     def update_fog_for_unit(self, unit):
         for dx in range(-3, 4):
@@ -359,6 +506,29 @@ class Game:
                 y = unit.grid_y + dy
                 if 0 <= x < GRID_WIDTH and 0 <= y < GRID_HEIGHT:
                     self.explored[x][y] = True
+    
+    def get_tile_info(self, tx, ty):
+        info = f"Tile ({tx}, {ty}): "
+        # Check if inside a structure:
+        for struct in self.structures:
+            if struct.grid_x <= tx < struct.grid_x + struct.width and struct.grid_y <= ty < struct.grid_y + struct.height:
+                local_x = tx - struct.grid_x
+                local_y = ty - struct.grid_y
+                tile = struct.tile_map[local_x][local_y]
+                info += f"Inside structure, {tile}. "
+                break
+        # Check obstacles:
+        for obs in self.obstacles:
+            if obs.grid_x <= tx < obs.grid_x + obs.grid_width and obs.grid_y <= ty < obs.grid_y + obs.grid_height:
+                info += f"Obstacle: {obs.type}. "
+        # Check chests:
+        for chest in self.chests:
+            if chest.grid_x == tx and chest.grid_y == ty:
+                if chest.opened:
+                    info += f"Chest (opened): {chest.contents}."
+                else:
+                    info += f"Chest (locked: {chest.locked})."
+        return info
     
     def handle_game_events(self):
         for event in pygame.event.get():
@@ -369,23 +539,64 @@ class Game:
                     self.__init__()
             else:
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_e:
-                        self.end_turn()
-                    elif event.key == pygame.K_TAB:
-                        self.current_unit_index = (self.current_unit_index + 1) % len(self.player_units)
-                    elif event.key in [pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]:
-                        dx, dy = 0, 0
-                        if event.key == pygame.K_UP: dy = -1
-                        elif event.key == pygame.K_DOWN: dy = 1
-                        elif event.key == pygame.K_LEFT: dx = -1
-                        elif event.key == pygame.K_RIGHT: dx = 1
-                        self.move_current_unit(dx, dy)
-                    elif event.key == pygame.K_1:
-                        self.attempt_spawn("Imp")
-                    elif event.key == pygame.K_2:
-                        self.attempt_spawn("Ogre")
-                    elif event.key == pygame.K_3:
-                        self.attempt_spawn("Goblin")
+                    # Toggle look mode with L
+                    if event.key == pygame.K_l:
+                        self.look_mode = not self.look_mode
+                        if self.look_mode:
+                            # Initialize cursor at current unit's position
+                            self.look_cursor_x = self.player_units[self.current_unit_index].grid_x
+                            self.look_cursor_y = self.player_units[self.current_unit_index].grid_y
+                    elif self.look_mode:
+                        # In look mode, arrow keys move the look cursor
+                        if event.key == pygame.K_UP:
+                            self.look_cursor_y = max(0, self.look_cursor_y - 1)
+                        elif event.key == pygame.K_DOWN:
+                            self.look_cursor_y = min(GRID_HEIGHT - 1, self.look_cursor_y + 1)
+                        elif event.key == pygame.K_LEFT:
+                            self.look_cursor_x = max(0, self.look_cursor_x - 1)
+                        elif event.key == pygame.K_RIGHT:
+                            self.look_cursor_x = min(GRID_WIDTH - 1, self.look_cursor_x + 1)
+                    else:
+                        # Not in look mode:
+                        if event.key == pygame.K_e:
+                            self.end_turn()
+                        elif event.key == pygame.K_TAB:
+                            self.current_unit_index = (self.current_unit_index + 1) % len(self.player_units)
+                        elif event.key == pygame.K_o:
+                            # Attempt to open chest on current unit's tile
+                            unit = self.player_units[self.current_unit_index]
+                            for chest in self.chests:
+                                if chest.grid_x == unit.grid_x and chest.grid_y == unit.grid_y and not chest.opened:
+                                    contents = chest.open(self.inventory)
+                                    if contents is None:
+                                        print("Chest is locked and you have no key!")
+                                    else:
+                                        print(f"Chest opened! You found: {contents}")
+                                        # Add items to inventory:
+                                        for item in contents:
+                                            self.inventory[item] = self.inventory.get(item, 0) + 1
+                                    break
+                        elif event.key in [pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]:
+                            dx = dy = 0
+                            if event.key == pygame.K_UP: dy = -1
+                            elif event.key == pygame.K_DOWN: dy = 1
+                            elif event.key == pygame.K_LEFT: dx = -1
+                            elif event.key == pygame.K_RIGHT: dx = 1
+                            self.move_current_unit(dx, dy)
+                        elif event.key == pygame.K_1:
+                            self.attempt_spawn("Imp")
+                        elif event.key == pygame.K_2:
+                            self.attempt_spawn("Ogre")
+                        elif event.key == pygame.K_3:
+                            self.attempt_spawn("Goblin")
+                        elif event.key == pygame.K_4:
+                            self.attempt_spawn("Ghost")
+                        elif event.key == pygame.K_5:
+                            self.attempt_spawn("Demon")
+                        elif event.key == pygame.K_6:
+                            self.attempt_spawn("Zombie")
+                        elif event.key == pygame.K_7:
+                            self.attempt_spawn("Bat")
     
     def attempt_spawn(self, ally_type):
         if self.player_units[self.current_unit_index] != self.wizard:
@@ -428,12 +639,22 @@ class Game:
                 unit.ap -= 1
                 self.perform_attack(unit, enemy, original_pos)
             elif is_tile_walkable(new_x, new_y, self.obstacles):
-                unit.grid_x = new_x
-                unit.grid_y = new_y
-                unit.ap -= 1
-                self.update_fog_for_unit(unit)
-                if unit == self.wizard and self.portal and self.wizard.grid_x == self.portal.grid_x and self.wizard.grid_y == self.portal.grid_y:
-                    self.complete_level()
+                # Also check if the tile is inside a structure; if so, restrict movement if it's a wall
+                blocked = False
+                for struct in self.structures:
+                    if struct.grid_x <= new_x < struct.grid_x + struct.width and struct.grid_y <= new_y < struct.grid_y + struct.height:
+                        local_x = new_x - struct.grid_x
+                        local_y = new_y - struct.grid_y
+                        if struct.tile_map[local_x][local_y] == "wall":
+                            blocked = True
+                        break
+                if not blocked:
+                    unit.grid_x = new_x
+                    unit.grid_y = new_y
+                    unit.ap -= 1
+                    self.update_fog_for_unit(unit)
+                    if unit == self.wizard and self.portal and self.wizard.grid_x == self.portal.grid_x and self.wizard.grid_y == self.portal.grid_y:
+                        self.complete_level()
     
     def end_turn(self):
         self.turn_count += 1
@@ -491,11 +712,11 @@ class Game:
     
     def draw_game(self):
         game_area = pygame.Surface((GAME_VIEW_WIDTH, GAME_VIEW_HEIGHT))
-        # Tile the background with grass
-        for tx in range((GAME_VIEW_WIDTH // TILE_SIZE) + 2):
-            for ty in range((GAME_VIEW_HEIGHT // TILE_SIZE) + 2):
-                # Compute world tile coordinates based on camera offset later.
-                pass  # We'll blit the grass tile in the drawing loop below.
+        # Draw background tiles (using grass unless overridden by a structure)
+        for tile_x in range((GAME_VIEW_WIDTH // TILE_SIZE) + 2):
+            for tile_y in range((GAME_VIEW_HEIGHT // TILE_SIZE) + 2):
+                # We'll compute actual world coordinates later
+                pass
         if self.player_units:
             center_x = self.player_units[self.current_unit_index].grid_x * TILE_SIZE + TILE_SIZE//2
             center_y = self.player_units[self.current_unit_index].grid_y * TILE_SIZE + TILE_SIZE//2
@@ -505,13 +726,29 @@ class Game:
         cam_y = center_y - GAME_VIEW_HEIGHT//2
         cam_x = max(0, min(cam_x, WORLD_WIDTH - GAME_VIEW_WIDTH))
         cam_y = max(0, min(cam_y, WORLD_HEIGHT - GAME_VIEW_HEIGHT))
-        # Draw background tiles (grass)
-        for tile_x in range(cam_x // TILE_SIZE, (cam_x + GAME_VIEW_WIDTH) // TILE_SIZE + 1):
-            for tile_y in range(cam_y // TILE_SIZE, (cam_y + GAME_VIEW_HEIGHT) // TILE_SIZE + 1):
-                pos_x = tile_x * TILE_SIZE - cam_x
-                pos_y = tile_y * TILE_SIZE - cam_y
-                game_area.blit(ASSETS["grass_tile"], (pos_x, pos_y))
-        # Draw obstacles using tile images based on type
+        # Draw each tile in view:
+        for tx in range(cam_x // TILE_SIZE, (cam_x + GAME_VIEW_WIDTH) // TILE_SIZE + 1):
+            for ty in range(cam_y // TILE_SIZE, (cam_y + GAME_VIEW_HEIGHT) // TILE_SIZE + 1):
+                pos_x = tx * TILE_SIZE - cam_x
+                pos_y = ty * TILE_SIZE - cam_y
+                # Check if this tile is inside a structure:
+                drawn = False
+                for struct in self.structures:
+                    if struct.grid_x <= tx < struct.grid_x + struct.width and struct.grid_y <= ty < struct.grid_y + struct.height:
+                        local_x = tx - struct.grid_x
+                        local_y = ty - struct.grid_y
+                        tile_type = struct.tile_map[local_x][local_y]
+                        if tile_type == "wall":
+                            game_area.blit(ASSETS["wall_tile"], (pos_x, pos_y))
+                        elif tile_type == "door":
+                            game_area.blit(ASSETS["door_tile"], (pos_x, pos_y))
+                        else:
+                            game_area.blit(ASSETS["floor_tile"], (pos_x, pos_y))
+                        drawn = True
+                        break
+                if not drawn:
+                    game_area.blit(ASSETS["grass_tile"], (pos_x, pos_y))
+        # Draw obstacles (which may overlap the tiles)
         for obs in self.obstacles:
             pos_x = obs.grid_x * TILE_SIZE - cam_x
             pos_y = obs.grid_y * TILE_SIZE - cam_y
@@ -521,13 +758,21 @@ class Game:
                 game_area.blit(ASSETS["building_tile"], (pos_x, pos_y))
             elif obs.type == "swamp":
                 game_area.blit(ASSETS["swamp_tile"], (pos_x, pos_y))
+        # Draw chests
+        for chest in self.chests:
+            pos_x = chest.grid_x * TILE_SIZE - cam_x
+            pos_y = chest.grid_y * TILE_SIZE - cam_y
+            if chest.opened:
+                game_area.blit(ASSETS["chest_open"], (pos_x, pos_y))
+            else:
+                game_area.blit(ASSETS["chest_closed"], (pos_x, pos_y))
         # Draw portal if exists
         if self.portal:
             rect = pygame.Rect(self.portal.grid_x * TILE_SIZE - cam_x, self.portal.grid_y * TILE_SIZE - cam_y, TILE_SIZE, TILE_SIZE)
             pygame.draw.rect(game_area, BLUE, rect)
             p_text = self.font.render(str(self.portal.countdown), True, WHITE)
             game_area.blit(p_text, (rect.x, rect.y))
-        # Draw player units using animation frames
+        # Draw player units with animation
         for i, unit in enumerate(self.player_units):
             frame = unit.frames[(pygame.time.get_ticks() // 300) % len(unit.frames)]
             pos = (unit.grid_x * TILE_SIZE - cam_x, unit.grid_y * TILE_SIZE - cam_y)
@@ -551,6 +796,11 @@ class Game:
                 pygame.draw.circle(game_area, RED, (eff_x, eff_y), 10)
             else:
                 self.attack_effects.remove(effect)
+        # Draw look mode cursor if active
+        if self.look_mode:
+            cursor_x = self.look_cursor_x * TILE_SIZE - cam_x
+            cursor_y = self.look_cursor_y * TILE_SIZE - cam_y
+            pygame.draw.rect(game_area, YELLOW, (cursor_x, cursor_y, TILE_SIZE, TILE_SIZE), 3)
         # Apply fog-of-war
         for x in range(cam_x//TILE_SIZE, (cam_x+GAME_VIEW_WIDTH)//TILE_SIZE + 1):
             for y in range(cam_y//TILE_SIZE, (cam_y+GAME_VIEW_HEIGHT)//TILE_SIZE + 1):
@@ -574,6 +824,7 @@ class Game:
     def draw_sidebar(self, cam_x, cam_y):
         sidebar_rect = pygame.Rect(GAME_VIEW_WIDTH, 0, SIDEBAR_WIDTH, SIDEBAR_HEIGHT)
         pygame.draw.rect(self.screen, (50, 50, 50), sidebar_rect)
+        # --- Draw Minimap ---
         minimap_size = 180
         minimap_surface = pygame.Surface((minimap_size, minimap_size))
         minimap_surface.fill((34, 139, 34))
@@ -584,11 +835,22 @@ class Game:
             w = obs.grid_width * TILE_SIZE * scale
             h = obs.grid_height * TILE_SIZE * scale
             pygame.draw.rect(minimap_surface, GRAY, (x, y, w, h))
+        for struct in self.structures:
+            x = struct.grid_x * TILE_SIZE * scale
+            y = struct.grid_y * TILE_SIZE * scale
+            w = struct.width * TILE_SIZE * scale
+            h = struct.height * TILE_SIZE * scale
+            pygame.draw.rect(minimap_surface, DARK_GRAY, (x, y, w, h), 2)
+        for chest in self.chests:
+            x = chest.grid_x * TILE_SIZE * scale
+            y = chest.grid_y * TILE_SIZE * scale
+            size = TILE_SIZE * scale
+            pygame.draw.rect(minimap_surface, (255,215,0), (x, y, size, size))
         for unit in self.player_units:
             x = unit.grid_x * TILE_SIZE * scale
             y = unit.grid_y * TILE_SIZE * scale
             size = TILE_SIZE * scale
-            pygame.draw.rect(minimap_surface, (0,0,0), (x, y, size, size))  # simple block
+            pygame.draw.rect(minimap_surface, (0,0,0), (x, y, size, size))
         for enemy in self.enemies:
             x = enemy.grid_x * TILE_SIZE * scale
             y = enemy.grid_y * TILE_SIZE * scale
@@ -602,6 +864,7 @@ class Game:
         cam_rect = pygame.Rect(cam_x * scale, cam_y * scale, GAME_VIEW_WIDTH * scale, GAME_VIEW_HEIGHT * scale)
         pygame.draw.rect(minimap_surface, YELLOW, cam_rect, 2)
         self.screen.blit(minimap_surface, (sidebar_rect.x + 10, 10))
+        # --- Display Current Unit Stats ---
         stats_start_y = 200
         current_unit = self.player_units[self.current_unit_index]
         if current_unit == self.wizard:
@@ -621,6 +884,12 @@ class Game:
         for i, line in enumerate(stats_lines):
             text = self.font.render(line, True, WHITE)
             self.screen.blit(text, (sidebar_rect.x + 10, stats_start_y + i * 20))
+        # --- Display Look Mode Info if Active ---
+        if self.look_mode:
+            look_info = self.get_tile_info(self.look_cursor_x, self.look_cursor_y)
+            look_text = self.font.render("LOOK: " + look_info, True, WHITE)
+            self.screen.blit(look_text, (sidebar_rect.x + 10, 350))
+        # --- Display Turn, Level, and XP Info ---
         turn_text = self.font.render(f"Turn: {self.turn_count}/{self.turn_limit}", True, WHITE)
         level_text = self.font.render(f"Level: {self.level}", True, WHITE)
         xp_text = self.font.render(f"XP: {self.exp}", True, WHITE)
@@ -630,16 +899,25 @@ class Game:
         if self.portal:
             portal_text = self.font.render(f"Portal: {self.portal.countdown}", True, WHITE)
             self.screen.blit(portal_text, (sidebar_rect.x + 10, 440))
+        # --- Display Controls (with flashing End Turn if no AP remains) ---
         controls = [
-            "Controls:",
             "Arrows: Move/Attack",
             "TAB: Next Unit",
-            "1/2/3: Spawn Ally",
-            "E: End Turn"
+            "1-7: Spawn Ally",
+            "O: Open Chest",
+            "L: Look Mode"
         ]
+        base_y = 500
         for i, line in enumerate(controls):
-            text = self.font.render(line, True, WHITE)
-            self.screen.blit(text, (sidebar_rect.x + 10, 500 + i * 20))
+            color = WHITE
+            self.screen.blit(self.font.render(line, True, color), (sidebar_rect.x + 10, base_y + i * 20))
+        # Flash "E: End Turn" if no unit has AP
+        if all(unit.ap == 0 for unit in self.player_units):
+            flash_color = RED if (pygame.time.get_ticks()//500) % 2 == 0 else WHITE
+        else:
+            flash_color = WHITE
+        end_turn_text = self.font.render("E: End Turn", True, flash_color)
+        self.screen.blit(end_turn_text, (sidebar_rect.x + 10, base_y + len(controls)*20))
     
     def run(self):
         while True:
