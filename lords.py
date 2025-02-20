@@ -17,7 +17,7 @@ SCREEN_WIDTH, SCREEN_HEIGHT = GAME_VIEW_WIDTH + SIDEBAR_WIDTH, 600
 
 FPS = 60
 
-# Colors (for UI and fallback)
+# Colors
 WHITE      = (255, 255, 255)
 BLACK      = (0, 0, 0)
 RED        = (255, 0, 0)
@@ -258,7 +258,7 @@ class Structure:
         self.grid_y = grid_y
         self.width = width
         self.height = height
-        self.tile_map = [[ "floor" for _ in range(height)] for _ in range(width)]
+        self.tile_map = [["floor" for _ in range(height)] for _ in range(width)]
         for i in range(width):
             self.tile_map[i][0] = "wall"
             self.tile_map[i][height-1] = "wall"
@@ -319,16 +319,18 @@ class GamePlayer:
         self.wizard = Wizard(start_pos[0], start_pos[1], wizard_config)
         self.player_units = [self.wizard]
         self.allowed_allies = copy.deepcopy(purchased_allies)
+        # Each player gets their own fog-of-war grid (initially unexplored)
         self.explored = [[False for _ in range(GRID_HEIGHT)] for _ in range(GRID_WIDTH)]
         self.current_unit_index = 0
         self.inventory = {}
         self.look_mode = False
         self.look_cursor_x = start_pos[0]
         self.look_cursor_y = start_pos[1]
-
     def update_fog_for_unit(self, unit):
-        for dx in range(-3, 4):
-            for dy in range(-3, 4):
+        # Reveal a radius of 3 tiles around the unit.
+        radius = 3
+        for dx in range(-radius, radius+1):
+            for dy in range(-radius, radius+1):
                 x = (unit.grid_x + dx) % GRID_WIDTH
                 y = (unit.grid_y + dy) % GRID_HEIGHT
                 self.explored[x][y] = True
@@ -468,12 +470,24 @@ class Game:
         self.chests = []
         self.setup_world()
         self.attack_effects = []
-        self.look_mode = False
-        self.look_cursor_x = 0
-        self.look_cursor_y = 0
         self.state_inventory = {}
         self.game_over = False
         self.game_win = False
+
+    # --- Shared target detection ---
+    def get_target_at(self, x, y, current_player):
+        # Check units from other players.
+        for player in self.players:
+            if player == current_player:
+                continue
+            for unit in player.player_units:
+                if unit.grid_x == x and unit.grid_y == y:
+                    return unit
+        # Check computer-controlled enemies.
+        for enemy in self.enemies:
+            if enemy.grid_x == x and enemy.grid_y == y:
+                return enemy
+        return None
 
     # --- State: PLAYER_COUNT ---
     def handle_player_count_events(self):
@@ -499,9 +513,9 @@ class Game:
                     self.editor_index = 0
 
     def draw_player_count(self):
-        #pygame.mixer.init()
-        #pygame.mixer.music.load("assets/editor_music.mp3")
-        #pygame.mixer.music.play(-1)  # Loop indefinitely
+        pygame.mixer.init()
+        pygame.mixer.music.load("assets/editor_music.mp3")
+        pygame.mixer.music.play(-1)
         self.screen.fill(BLACK)
         title = self.font.render("Select Number of Players (1-4):", True, WHITE)
         self.screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 200))
@@ -524,12 +538,10 @@ class Game:
                 elif event.key in [pygame.K_RIGHT, pygame.K_RETURN]:
                     option = self.editor_options[self.editor_index]
                     if "action" in option and option["action"] == "finish":
-                        # Save current player's config, then reset defaults for next player
                         self.player_configs[self.current_editor_player] = (
                             copy.deepcopy(self.default_wizard),
                             copy.deepcopy(self.default_allies)
                         )
-                        # Reset defaults to base values for the next player
                         self.default_wizard = copy.deepcopy(BASE_WIZARD_CONFIG)
                         self.default_allies = {"Imp": 0, "Ogre": 0, "Goblin": 0, "Ghost": 0, "Demon": 0, "Zombie": 0, "Bat": 0}
                         self.current_editor_player += 1
@@ -538,6 +550,8 @@ class Game:
                             for i, config in enumerate(self.player_configs):
                                 start_pos = get_start_pos(i, self.num_players)
                                 player = GamePlayer(config[0], config[1], start_pos)
+                                # Initially update fog around starting unit.
+                                player.update_fog_for_unit(player.wizard)
                                 self.players.append(player)
                             self.state = "GAME"
                             self.active_player_index = 0
@@ -607,7 +621,6 @@ class Game:
                 if is_tile_walkable(x, y, self.obstacles, self.structures, flying=False):
                     self.chests.append(Chest(x, y))
                     break
-        # Initially spawn enemies
         self.enemies = []
         for _ in range(ENEMY_SPAWN_BASE):
             x = random.randint(0, GRID_WIDTH - 1)
@@ -695,7 +708,6 @@ class Game:
             new_ally = Ally(player.wizard.grid_x, player.wizard.grid_y, ally_type)
             player.player_units.append(new_ally)
             player.allowed_allies[ally_type] -= 1
-            player.update_fog_for_unit(new_ally)
     
     def get_enemy_at(self, x, y):
         x = x % GRID_WIDTH
@@ -725,11 +737,11 @@ class Game:
         if unit.ap > 0:
             new_x = (unit.grid_x + dx) % GRID_WIDTH
             new_y = (unit.grid_y + dy) % GRID_HEIGHT
-            enemy = self.get_enemy_at(new_x, new_y)
             original_pos = (unit.grid_x, unit.grid_y)
-            if enemy:
+            target = self.get_target_at(new_x, new_y, player)
+            if target:
                 unit.ap -= 1
-                self.perform_attack(unit, enemy, original_pos, player)
+                self.perform_attack(unit, target, original_pos, player)
             elif is_tile_walkable(new_x, new_y, self.obstacles, self.structures, unit.flying):
                 blocked = False
                 for struct in self.structures:
@@ -743,6 +755,7 @@ class Game:
                     unit.grid_x = new_x
                     unit.grid_y = new_y
                     unit.ap -= 1
+                    # Update fog-of-war for the active player
                     player.update_fog_for_unit(unit)
                     if unit == player.wizard and self.portal and player.wizard.grid_x == self.portal.grid_x and player.wizard.grid_y == self.portal.grid_y:
                         self.complete_level()
@@ -764,7 +777,6 @@ class Game:
             self.portal.countdown -= 1
             if self.portal.countdown <= 0:
                 self.game_over = True
-        # Cycle to the next player; if all players have moved, let enemies take their turn.
         self.active_player_index = (self.active_player_index + 1) % len(self.players)
         if self.active_player_index == 0:
             self.enemy_turn()
@@ -803,11 +815,8 @@ class Game:
             self.level += 1
             self.turn_count = 0
             self.portal = None
-            # Reset editor for next level:
             self.state = "EDITOR"
             self.current_editor_player = 0
-            # Reinitialize player_configs from current players if you wish to preserve upgrades,
-            # or reset to base defaults. Here, we'll reset to base defaults.
             self.player_configs = []
             for _ in range(self.num_players):
                 self.player_configs.append((copy.deepcopy(BASE_WIZARD_CONFIG), {"Imp":0, "Ogre":0, "Goblin":0, "Ghost":0, "Demon":0, "Zombie":0, "Bat":0}))
@@ -815,7 +824,6 @@ class Game:
             self.default_allies = {"Imp":0, "Ogre":0, "Goblin":0, "Ghost":0, "Demon":0, "Zombie":0, "Bat":0}
             self.exp = 400
             self.editor_index = 0
-            # Re-spawn enemies for the new level:
             self.enemies = []
             for _ in range(ENEMY_SPAWN_BASE + (self.level - 1) * 2):
                 x = random.randint(0, GRID_WIDTH - 1)
@@ -823,20 +831,22 @@ class Game:
                 self.enemies.append(Enemy(x, y))
     
     def draw_game(self):
+        # Center camera on active player's current unit.
         active_player = self.players[self.active_player_index]
         current_unit = active_player.player_units[active_player.current_unit_index]
-        center_x = current_unit.grid_x * TILE_SIZE + TILE_SIZE//2
-        center_y = current_unit.grid_y * TILE_SIZE + TILE_SIZE//2
+        center_x = current_unit.grid_x * TILE_SIZE + TILE_SIZE // 2
+        center_y = current_unit.grid_y * TILE_SIZE + TILE_SIZE // 2
         cam_x = center_x
         cam_y = center_y
         game_area = pygame.Surface((GAME_VIEW_WIDTH, GAME_VIEW_HEIGHT))
+        # Draw background tiles
         for i in range(GRID_WIDTH):
             for j in range(GRID_HEIGHT):
                 tile_world_x = i * TILE_SIZE
                 tile_world_y = j * TILE_SIZE
                 screen_x = world_to_screen(tile_world_x, cam_x, WORLD_WIDTH, GAME_VIEW_WIDTH)
                 screen_y = world_to_screen(tile_world_y, cam_y, WORLD_HEIGHT, GAME_VIEW_HEIGHT)
-                if 0 - TILE_SIZE < screen_x < GAME_VIEW_WIDTH and 0 - TILE_SIZE < screen_y < GAME_VIEW_HEIGHT:
+                if -TILE_SIZE < screen_x < GAME_VIEW_WIDTH and -TILE_SIZE < screen_y < GAME_VIEW_HEIGHT:
                     drawn = False
                     for struct in self.structures:
                         if struct.grid_x <= i < struct.grid_x + struct.width and struct.grid_y <= j < struct.grid_y + struct.height:
@@ -856,6 +866,7 @@ class Game:
                             break
                     if not drawn:
                         game_area.blit(ASSETS["grass_tile"], (screen_x, screen_y))
+        # Draw obstacles
         for obs in self.obstacles:
             ox = obs.grid_x * TILE_SIZE
             oy = obs.grid_y * TILE_SIZE
@@ -867,6 +878,7 @@ class Game:
                 game_area.blit(ASSETS["building_tile"], (sx, sy))
             elif obs.type == "swamp":
                 game_area.blit(ASSETS["swamp_tile"], (sx, sy))
+        # Draw chests
         for chest in self.chests:
             cx = chest.grid_x * TILE_SIZE
             cy = chest.grid_y * TILE_SIZE
@@ -876,6 +888,7 @@ class Game:
                 game_area.blit(ASSETS["chest_open"], (sx, sy))
             else:
                 game_area.blit(ASSETS["chest_closed"], (sx, sy))
+        # Draw portal
         if self.portal:
             px = self.portal.grid_x * TILE_SIZE
             py = self.portal.grid_y * TILE_SIZE
@@ -885,17 +898,21 @@ class Game:
             pygame.draw.rect(game_area, BLUE, rect)
             p_text = self.font.render(str(self.portal.countdown), True, WHITE)
             game_area.blit(p_text, (rect.x, rect.y))
-        for i, unit in enumerate(active_player.player_units):
-            ux = unit.grid_x * TILE_SIZE
-            uy = unit.grid_y * TILE_SIZE
-            sx = world_to_screen(ux, cam_x, WORLD_WIDTH, GAME_VIEW_WIDTH)
-            sy = world_to_screen(uy, cam_y, WORLD_HEIGHT, GAME_VIEW_HEIGHT)
-            frame = unit.frames[(pygame.time.get_ticks() // 300) % len(unit.frames)]
-            game_area.blit(frame, (sx, sy))
-            hp_text = self.font.render(str(unit.hp), True, WHITE)
-            game_area.blit(hp_text, (sx, sy))
-            if i == active_player.current_unit_index:
-                pygame.draw.rect(game_area, WHITE, (sx-2, sy-2, TILE_SIZE+4, TILE_SIZE+4), 2)
+        # Draw all player units (from every player)
+        for player in self.players:
+            for unit in player.player_units:
+                ux = unit.grid_x * TILE_SIZE
+                uy = unit.grid_y * TILE_SIZE
+                sx = world_to_screen(ux, cam_x, WORLD_WIDTH, GAME_VIEW_WIDTH)
+                sy = world_to_screen(uy, cam_y, WORLD_HEIGHT, GAME_VIEW_HEIGHT)
+                frame = unit.frames[(pygame.time.get_ticks() // 300) % len(unit.frames)]
+                game_area.blit(frame, (sx, sy))
+                hp_text = self.font.render(str(unit.hp), True, WHITE)
+                game_area.blit(hp_text, (sx, sy))
+                # Highlight active player's selected unit.
+                if player == active_player and unit == active_player.player_units[active_player.current_unit_index]:
+                    pygame.draw.rect(game_area, WHITE, (sx-2, sy-2, TILE_SIZE+4, TILE_SIZE+4), 2)
+        # Draw enemies
         for enemy in self.enemies:
             ex = enemy.grid_x * TILE_SIZE
             ey = enemy.grid_y * TILE_SIZE
@@ -905,6 +922,7 @@ class Game:
             game_area.blit(frame, (sx, sy))
             e_text = self.font.render(str(enemy.hp), True, WHITE)
             game_area.blit(e_text, (sx, sy))
+        # Draw attack effects
         for effect in self.attack_effects[:]:
             if effect.is_active():
                 sx = world_to_screen(effect.grid_x * TILE_SIZE, cam_x, WORLD_WIDTH, GAME_VIEW_WIDTH) + TILE_SIZE//2
@@ -912,10 +930,7 @@ class Game:
                 pygame.draw.circle(game_area, RED, (sx, sy), 10)
             else:
                 self.attack_effects.remove(effect)
-        if active_player.look_mode:
-            cursor_x = world_to_screen(active_player.look_cursor_x * TILE_SIZE, cam_x, WORLD_WIDTH, GAME_VIEW_WIDTH)
-            cursor_y = world_to_screen(active_player.look_cursor_y * TILE_SIZE, cam_y, WORLD_HEIGHT, GAME_VIEW_HEIGHT)
-            pygame.draw.rect(game_area, YELLOW, (cursor_x, cursor_y, TILE_SIZE, TILE_SIZE), 3)
+        # Draw fog-of-war overlay based on active player's explored grid.
         for i in range(GRID_WIDTH):
             for j in range(GRID_HEIGHT):
                 if not active_player.explored[i][j]:
@@ -923,10 +938,10 @@ class Game:
                     ty = j * TILE_SIZE
                     sx = world_to_screen(tx, cam_x, WORLD_WIDTH, GAME_VIEW_WIDTH)
                     sy = world_to_screen(ty, cam_y, WORLD_HEIGHT, GAME_VIEW_HEIGHT)
-                    s = pygame.Surface((TILE_SIZE, TILE_SIZE))
-                    s.set_alpha(200)
-                    s.fill(BLACK)
-                    game_area.blit(s, (sx, sy))
+                    fog = pygame.Surface((TILE_SIZE, TILE_SIZE))
+                    fog.set_alpha(200)
+                    fog.fill(BLACK)
+                    game_area.blit(fog, (sx, sy))
         self.screen.blit(game_area, (0, 0))
         self.draw_sidebar(cam_x, cam_y, active_player)
         if self.game_over:
@@ -936,6 +951,7 @@ class Game:
             win_text = self.font.render("You Win! Press Enter to restart.", True, GREEN)
             self.screen.blit(win_text, (GAME_VIEW_WIDTH//2 - win_text.get_width()//2, GAME_VIEW_HEIGHT//2))
         pygame.display.flip()
+
     def draw_sidebar(self, cam_x, cam_y, active_player):
         sidebar_rect = pygame.Rect(GAME_VIEW_WIDTH, 0, SIDEBAR_WIDTH, SIDEBAR_HEIGHT)
         pygame.draw.rect(self.screen, (50, 50, 50), sidebar_rect)
