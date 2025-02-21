@@ -473,6 +473,8 @@ class Game:
         self.state_inventory = {}
         self.game_over = False
         self.game_win = False
+        # NEW: Restart flag for safe restarting
+        self.restart_flag = False
 
     # --- Shared target detection ---
     def get_target_at(self, x, y, current_player):
@@ -515,7 +517,7 @@ class Game:
     def draw_player_count(self):
         pygame.mixer.init()
         pygame.mixer.music.load("assets/editor_music.mp3")
-        pygame.mixer.music.play(-1)
+        #pygame.mixer.music.play(-1)
         self.screen.fill(BLACK)
         title = self.font.render("Select Number of Players (1-4):", True, WHITE)
         self.screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 200))
@@ -633,9 +635,12 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
+            # When the game is over or won, wait for ENTER to restart.
             if self.game_over or self.game_win:
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                    self.__init__()
+                    # Instead of reinitializing here, we set a flag.
+                    self.restart_flag = True
+                return
             else:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_l:
@@ -1058,7 +1063,12 @@ class Game:
             elif self.state == "GAME":
                 self.handle_game_events()
                 self.draw_game()
+            # If the restart flag is set, exit the run loop to restart the game.
+            if self.restart_flag:
+                break
 
 if __name__ == "__main__":
-    game = Game()
-    game.run()
+    # Wrap the game in a loop so that a new instance is created each time.
+    while True:
+        game = Game()
+        game.run()
