@@ -7,7 +7,7 @@ import os
 
 # --- Global Constants ---
 TILE_SIZE = 40
-GRID_WIDTH, GRID_HEIGHT = 50, 50
+GRID_WIDTH, GRID_HEIGHT = 32, 24
 WORLD_WIDTH = TILE_SIZE * GRID_WIDTH   # 2000 pixels wide
 WORLD_HEIGHT = TILE_SIZE * GRID_HEIGHT   # 2000 pixels tall
 
@@ -136,16 +136,54 @@ ENEMY_STATS = {
 
 XP_PER_ENEMY = 10
 XP_LEVEL_BONUS = 50
-BASE_TURN_LIMIT = 50
+BASE_TURN_LIMIT = 40
 ENEMY_SPAWN_BASE = 10
 MAX_LEVEL = 100
 PORTAL_COUNTDOWN = 10
 
 MAP_TEMPLATES = [
-    {"name": "Chaos Plains", "trees": 30, "buildings": 8, "swamps": 4, "structures": 2, "chests": 6},
-    {"name": "Citadel March", "trees": 15, "buildings": 14, "swamps": 2, "structures": 5, "chests": 5},
-    {"name": "Blighted Fen", "trees": 16, "buildings": 6, "swamps": 10, "structures": 3, "chests": 7},
-    {"name": "Darkwood Ring", "trees": 45, "buildings": 4, "swamps": 3, "structures": 3, "chests": 8},
+    {
+        "name": "Borderlands",
+        "trees": [(2, 2, 3, 2), (8, 1, 4, 2), (21, 3, 5, 2), (27, 8, 3, 2)],
+        "buildings": [(4, 10, 2, 2), (16, 14, 2, 2), (24, 16, 2, 2)],
+        "swamps": [(11, 6, 3, 3), (18, 9, 3, 2)],
+        "structures": [(6, 4, 7, 6), (20, 12, 8, 7)],
+        "chests": [(3, 20), (14, 11), (29, 19)],
+        "enemy_spawns": [(1, 1), (30, 1), (30, 22), (1, 22), (15, 2), (17, 21)],
+    },
+    {
+        "name": "Cursed Marsh",
+        "trees": [(3, 3, 4, 2), (9, 18, 4, 2), (24, 2, 5, 2)],
+        "buildings": [(2, 12, 2, 2), (14, 4, 2, 2), (26, 15, 2, 2)],
+        "swamps": [(6, 7, 4, 4), (12, 10, 5, 4), (20, 8, 4, 4)],
+        "structures": [(4, 2, 9, 7), (19, 14, 10, 8)],
+        "chests": [(5, 20), (15, 15), (27, 6), (30, 21)],
+        "enemy_spawns": [(2, 2), (29, 2), (28, 20), (5, 12), (16, 6), (22, 18), (30, 10)],
+    },
+    {
+        "name": "Iron Keep",
+        "trees": [(1, 2, 3, 2), (27, 3, 3, 2), (10, 20, 6, 2)],
+        "buildings": [(7, 5, 2, 2), (12, 5, 2, 2), (17, 5, 2, 2), (22, 5, 2, 2)],
+        "swamps": [(5, 15, 3, 3), (24, 15, 3, 3)],
+        "structures": [(9, 8, 14, 10)],
+        "chests": [(15, 12), (10, 10), (21, 10), (15, 17)],
+        "enemy_spawns": [(2, 1), (29, 1), (2, 22), (29, 22), (9, 6), (23, 6), (15, 3), (15, 21)],
+    },
+    {
+        "name": "Chaos Citadel",
+        "trees": [(2, 5, 3, 2), (27, 5, 3, 2), (2, 17, 3, 2), (27, 17, 3, 2)],
+        "buildings": [(6, 3, 2, 2), (24, 3, 2, 2), (6, 19, 2, 2), (24, 19, 2, 2)],
+        "swamps": [(11, 3, 3, 3), (18, 3, 3, 3), (11, 18, 3, 3), (18, 18, 3, 3)],
+        "structures": [(8, 7, 16, 10)],
+        "chests": [(9, 8), (22, 8), (9, 15), (22, 15), (16, 12)],
+        "enemy_spawns": [(1, 1), (30, 1), (1, 22), (30, 22), (16, 1), (16, 22), (1, 12), (30, 12)],
+    },
+]
+
+ENEMY_ARCHETYPES = [
+    {"name": "Brute", "hp": 18, "max_ap": 2, "strength": 6, "ranged": False, "spellcaster": False},
+    {"name": "Hunter", "hp": 14, "max_ap": 3, "strength": 4, "ranged": True, "spellcaster": False},
+    {"name": "Sorcerer", "hp": 12, "max_ap": 3, "strength": 3, "ranged": True, "spellcaster": True},
 ]
 
 SPELLBOOK = {
@@ -444,14 +482,17 @@ class Ally:
         self.ap = self.max_ap
 
 class Enemy:
-    def __init__(self, grid_x, grid_y):
+    def __init__(self, grid_x, grid_y, archetype=None):
         self.grid_x = grid_x
         self.grid_y = grid_y
-        self.max_hp = ENEMY_STATS["hp"]
-        self.hp = ENEMY_STATS["hp"]
-        self.max_ap = ENEMY_STATS["max_ap"]
-        self.ap = ENEMY_STATS["max_ap"]
-        self.strength = ENEMY_STATS["strength"]
+        self.archetype = archetype or random.choice(ENEMY_ARCHETYPES)
+        self.max_hp = self.archetype["hp"]
+        self.hp = self.max_hp
+        self.max_ap = self.archetype["max_ap"]
+        self.ap = self.max_ap
+        self.strength = self.archetype["strength"]
+        self.ranged = self.archetype["ranged"]
+        self.spellcaster = self.archetype["spellcaster"]
         self.frames = ASSETS["enemy"]
         self.can_open_doors = False
         self.flying = False
@@ -656,49 +697,38 @@ class Game:
         pygame.display.flip()
 
     # --- Global Map Setup (shared among players) ---
+    def place_obstacle_rects(self, rects, obs_type):
+        for x, y, w, h in rects:
+            self.obstacles.append(Obstacle(x, y, w, h, obs_type))
+
     def setup_world(self):
         template = MAP_TEMPLATES[self.map_index % len(MAP_TEMPLATES)]
         self.active_map_name = template["name"]
         self.obstacles = []
-        for _ in range(template["trees"]):
-            x = random.randint(0, GRID_WIDTH - 1)
-            y = random.randint(0, GRID_HEIGHT - 1)
-            self.obstacles.append(Obstacle(x, y, 1, 1, "tree"))
-        for _ in range(template["buildings"]):
-            x = random.randint(0, GRID_WIDTH - 2)
-            y = random.randint(0, GRID_HEIGHT - 2)
-            self.obstacles.append(Obstacle(x, y, 2, 2, "building"))
-        for _ in range(template["swamps"]):
-            x = random.randint(0, GRID_WIDTH - 3)
-            y = random.randint(0, GRID_HEIGHT - 3)
-            self.obstacles.append(Obstacle(x, y, 3, 3, "swamp"))
+        self.place_obstacle_rects(template["trees"], "tree")
+        self.place_obstacle_rects(template["buildings"], "building")
+        self.place_obstacle_rects(template["swamps"], "swamp")
 
         self.structures = []
-        for _ in range(template["structures"]):
-            w = random.randint(5, 10)
-            h = random.randint(5, 10)
-            x = random.randint(0, GRID_WIDTH - w)
-            y = random.randint(0, GRID_HEIGHT - h)
-            self.structures.append(Structure(x, y, w, h))
+        for sx, sy, sw, sh in template["structures"]:
+            self.structures.append(Structure(sx, sy, sw, sh))
 
         self.chests = []
-        for _ in range(template["chests"]):
-            for _tries in range(100):
-                x = random.randint(0, GRID_WIDTH - 1)
-                y = random.randint(0, GRID_HEIGHT - 1)
-                if is_tile_walkable(x, y, self.obstacles, self.structures, flying=False):
-                    self.chests.append(Chest(x, y))
-                    break
+        for cx, cy in template["chests"]:
+            if is_tile_walkable(cx, cy, self.obstacles, self.structures, flying=False):
+                self.chests.append(Chest(cx, cy))
 
         self.enemies = []
-        enemy_count = ENEMY_SPAWN_BASE + (self.level - 1) * 2
-        for _ in range(enemy_count):
-            for _tries in range(100):
-                x = random.randint(0, GRID_WIDTH - 1)
-                y = random.randint(0, GRID_HEIGHT - 1)
-                if is_tile_walkable(x, y, self.obstacles, self.structures, flying=False):
-                    self.enemies.append(Enemy(x, y))
-                    break
+        stage_bonus = max(0, self.level - 1)
+        spawn_points = list(template["enemy_spawns"])
+        for i, (ex, ey) in enumerate(spawn_points):
+            archetype = ENEMY_ARCHETYPES[(i + self.level) % len(ENEMY_ARCHETYPES)]
+            if is_tile_walkable(ex, ey, self.obstacles, self.structures, flying=False):
+                enemy = Enemy(ex, ey, archetype=archetype)
+                enemy.max_hp += stage_bonus * 2
+                enemy.hp = enemy.max_hp
+                enemy.strength += stage_bonus // 2
+                self.enemies.append(enemy)
 
     def get_tile_info(self, x, y):
         for player in self.players:
@@ -972,31 +1002,70 @@ class Game:
         if self.active_player_index == 0:
             self.enemy_turn()
     
+    def get_nearest_enemy_target(self, enemy):
+        best_target = None
+        best_dist = 999
+        for player in self.players:
+            for unit in player.player_units:
+                dist = grid_distance(enemy.grid_x, enemy.grid_y, unit.grid_x, unit.grid_y)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_target = unit
+        return best_target, best_dist
+
     def enemy_turn(self):
         for enemy in self.enemies:
             for _ in range(enemy.ap):
-                target = None
-                if line_of_sight(enemy.grid_x, enemy.grid_y, self.players[self.active_player_index].wizard.grid_x, self.players[self.active_player_index].wizard.grid_y, self.obstacles):
-                    target = self.players[self.active_player_index].wizard
-                if target:
+                target, dist = self.get_nearest_enemy_target(enemy)
+                if not target:
+                    break
+
+                if enemy.spellcaster and dist <= 5 and random.random() < 0.35:
+                    target.hp -= (enemy.strength + 2)
+                    self.attack_effects.append(AttackEffect(target.grid_x, target.grid_y))
+                elif enemy.ranged and dist <= 4 and line_of_sight(enemy.grid_x, enemy.grid_y, target.grid_x, target.grid_y, self.obstacles):
+                    target.hp -= max(2, enemy.strength)
+                    self.attack_effects.append(AttackEffect(target.grid_x, target.grid_y))
+                else:
                     dx = 1 if enemy.grid_x < target.grid_x else -1 if enemy.grid_x > target.grid_x else 0
                     dy = 1 if enemy.grid_y < target.grid_y else -1 if enemy.grid_y > target.grid_y else 0
-                    if is_tile_walkable(enemy.grid_x + dx, enemy.grid_y + dy, self.obstacles, self.structures, enemy.flying):
-                        enemy.grid_x = (enemy.grid_x + dx) % GRID_WIDTH
-                        enemy.grid_y = (enemy.grid_y + dy) % GRID_HEIGHT
-                    if abs(enemy.grid_x - self.players[self.active_player_index].wizard.grid_x) <= 1 and abs(enemy.grid_y - self.players[self.active_player_index].wizard.grid_y) <= 1:
-                        self.players[self.active_player_index].wizard.hp -= enemy.strength
-                        if self.players[self.active_player_index].wizard.hp <= 0:
-                            self.game_over = True
+                    if abs(target.grid_x - enemy.grid_x) > GRID_WIDTH // 2:
+                        dx *= -1
+                    if abs(target.grid_y - enemy.grid_y) > GRID_HEIGHT // 2:
+                        dy *= -1
+
+                    candidate_steps = [(dx, 0), (0, dy), (dx, dy), random.choice([(1,0),(-1,0),(0,1),(0,-1)])]
+                    moved = False
+                    for sx, sy in candidate_steps:
+                        nx = (enemy.grid_x + sx) % GRID_WIDTH
+                        ny = (enemy.grid_y + sy) % GRID_HEIGHT
+                        if is_tile_walkable(nx, ny, self.obstacles, self.structures, enemy.flying):
+                            enemy.grid_x, enemy.grid_y = nx, ny
+                            moved = True
+                            break
+                    if not moved:
+                        continue
+
+                    if grid_distance(enemy.grid_x, enemy.grid_y, target.grid_x, target.grid_y) <= 1:
+                        target.hp -= enemy.strength
+                        self.attack_effects.append(AttackEffect(target.grid_x, target.grid_y))
+
+                if target.hp <= 0:
+                    for player in self.players:
+                        if target in player.player_units:
+                            if target == player.wizard:
+                                self.game_over = True
+                            else:
+                                player.player_units.remove(target)
+                            break
+                    if self.game_over:
                         break
-                else:
-                    dx, dy = random.choice([(1,0), (-1,0), (0,1), (0,-1)])
-                    if is_tile_walkable(enemy.grid_x + dx, enemy.grid_y + dy, self.obstacles, self.structures, enemy.flying):
-                        enemy.grid_x = (enemy.grid_x + dx) % GRID_WIDTH
-                        enemy.grid_y = (enemy.grid_y + dy) % GRID_HEIGHT
+            if self.game_over:
+                break
+
         for enemy in self.enemies:
             enemy.reset_ap()
-    
+
     def complete_level(self):
         bonus = XP_LEVEL_BONUS + (self.level * 2)
         self.exp += bonus
