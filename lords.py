@@ -7,7 +7,7 @@ import os
 
 # --- Global Constants ---
 TILE_SIZE = 40
-GRID_WIDTH, GRID_HEIGHT = 50, 50
+GRID_WIDTH, GRID_HEIGHT = 32, 24
 WORLD_WIDTH = TILE_SIZE * GRID_WIDTH   # 2000 pixels wide
 WORLD_HEIGHT = TILE_SIZE * GRID_HEIGHT   # 2000 pixels tall
 
@@ -136,10 +136,63 @@ ENEMY_STATS = {
 
 XP_PER_ENEMY = 10
 XP_LEVEL_BONUS = 50
-BASE_TURN_LIMIT = 50
+BASE_TURN_LIMIT = 40
 ENEMY_SPAWN_BASE = 10
 MAX_LEVEL = 100
 PORTAL_COUNTDOWN = 10
+
+MAP_TEMPLATES = [
+    {
+        "name": "Borderlands",
+        "trees": [(2, 2, 3, 2), (8, 1, 4, 2), (21, 3, 5, 2), (27, 8, 3, 2)],
+        "buildings": [(4, 10, 2, 2), (16, 14, 2, 2), (24, 16, 2, 2)],
+        "swamps": [(11, 6, 3, 3), (18, 9, 3, 2)],
+        "structures": [(6, 4, 7, 6), (20, 12, 8, 7)],
+        "chests": [(3, 20), (14, 11), (29, 19)],
+        "enemy_spawns": [(1, 1), (30, 1), (30, 22), (1, 22), (15, 2), (17, 21)],
+    },
+    {
+        "name": "Cursed Marsh",
+        "trees": [(3, 3, 4, 2), (9, 18, 4, 2), (24, 2, 5, 2)],
+        "buildings": [(2, 12, 2, 2), (14, 4, 2, 2), (26, 15, 2, 2)],
+        "swamps": [(6, 7, 4, 4), (12, 10, 5, 4), (20, 8, 4, 4)],
+        "structures": [(4, 2, 9, 7), (19, 14, 10, 8)],
+        "chests": [(5, 20), (15, 15), (27, 6), (30, 21)],
+        "enemy_spawns": [(2, 2), (29, 2), (28, 20), (5, 12), (16, 6), (22, 18), (30, 10)],
+    },
+    {
+        "name": "Iron Keep",
+        "trees": [(1, 2, 3, 2), (27, 3, 3, 2), (10, 20, 6, 2)],
+        "buildings": [(7, 5, 2, 2), (12, 5, 2, 2), (17, 5, 2, 2), (22, 5, 2, 2)],
+        "swamps": [(5, 15, 3, 3), (24, 15, 3, 3)],
+        "structures": [(9, 8, 14, 10)],
+        "chests": [(15, 12), (10, 10), (21, 10), (15, 17)],
+        "enemy_spawns": [(2, 1), (29, 1), (2, 22), (29, 22), (9, 6), (23, 6), (15, 3), (15, 21)],
+    },
+    {
+        "name": "Chaos Citadel",
+        "trees": [(2, 5, 3, 2), (27, 5, 3, 2), (2, 17, 3, 2), (27, 17, 3, 2)],
+        "buildings": [(6, 3, 2, 2), (24, 3, 2, 2), (6, 19, 2, 2), (24, 19, 2, 2)],
+        "swamps": [(11, 3, 3, 3), (18, 3, 3, 3), (11, 18, 3, 3), (18, 18, 3, 3)],
+        "structures": [(8, 7, 16, 10)],
+        "chests": [(9, 8), (22, 8), (9, 15), (22, 15), (16, 12)],
+        "enemy_spawns": [(1, 1), (30, 1), (1, 22), (30, 22), (16, 1), (16, 22), (1, 12), (30, 12)],
+    },
+]
+
+ENEMY_ARCHETYPES = [
+    {"name": "Brute", "hp": 18, "max_ap": 2, "strength": 6, "ranged": False, "spellcaster": False},
+    {"name": "Hunter", "hp": 14, "max_ap": 3, "strength": 4, "ranged": True, "spellcaster": False},
+    {"name": "Sorcerer", "hp": 12, "max_ap": 3, "strength": 3, "ranged": True, "spellcaster": True},
+]
+
+SPELLBOOK = {
+    pygame.K_z: {"name": "Magic Bolt", "mana": 8, "range": 6},
+    pygame.K_x: {"name": "Heal", "mana": 10},
+    pygame.K_c: {"name": "Teleport", "mana": 14, "range": 8},
+    pygame.K_v: {"name": "Fire Storm", "mana": 18, "radius": 1},
+    pygame.K_b: {"name": "Haste", "mana": 12},
+}
 
 # --- Asset Loader ---
 def load_image(name):
@@ -186,6 +239,25 @@ def mod_coord(x, max_val):
 def world_to_screen(x, cam, world_size, view_size):
     dx = ((x - cam + world_size/2) % world_size) - world_size/2
     return int(view_size//2 + dx)
+
+def grid_distance(x0, y0, x1, y1):
+    dx = abs(x0 - x1)
+    dy = abs(y0 - y1)
+    dx = min(dx, GRID_WIDTH - dx)
+    dy = min(dy, GRID_HEIGHT - dy)
+    return dx + dy
+
+def movement_cost_for_tile(x, y, obstacles, flying=False):
+    if flying:
+        return 1
+    x = mod_coord(x, GRID_WIDTH)
+    y = mod_coord(y, GRID_HEIGHT)
+    for obs in obstacles:
+        if obs.grid_x <= x < obs.grid_x + obs.grid_width and obs.grid_y <= y < obs.grid_y + obs.grid_height:
+            if obs.type == "swamp":
+                return 2
+            return 99
+    return 1
 
 # --- Helper Functions ---
 def is_tile_walkable(x, y, obstacles, structures, flying=False):
@@ -326,6 +398,28 @@ class GamePlayer:
         self.look_mode = False
         self.look_cursor_x = start_pos[0]
         self.look_cursor_y = start_pos[1]
+        self.xp = 0
+        self.level = 1
+        self.spellcasting = 1
+        self.haste_turns = 0
+
+    def gain_xp(self, amount):
+        self.xp += amount
+        leveled = False
+        required = self.level * 50
+        while self.xp >= required:
+            self.xp -= required
+            self.level += 1
+            self.wizard.max_mana += 5
+            self.wizard.mana = self.wizard.max_mana
+            self.wizard.max_hp += 5
+            self.wizard.hp = self.wizard.max_hp
+            self.wizard.strength += 1
+            self.spellcasting += 1
+            leveled = True
+            required = self.level * 50
+        return leveled
+
     def update_fog_for_unit(self, unit):
         # Reveal a radius of 3 tiles around the unit.
         radius = 3
@@ -344,6 +438,7 @@ class Wizard:
         self.mana = config["max_mana"]
         self.max_ap = config["max_ap"]
         self.ap = config["max_ap"]
+        self.max_hp = config["stamina"]
         self.hp = config["stamina"]
         self.strength = config["strength"]
         self.speed = WIZARD_SPEED
@@ -359,6 +454,7 @@ class Ally:
         self.grid_y = grid_y
         self.type = ally_type
         stats = ALLY_TYPES[ally_type]
+        self.max_hp = stats["hp"]
         self.hp = stats["hp"]
         self.max_ap = stats["max_ap"]
         self.ap = stats["max_ap"]
@@ -386,13 +482,17 @@ class Ally:
         self.ap = self.max_ap
 
 class Enemy:
-    def __init__(self, grid_x, grid_y):
+    def __init__(self, grid_x, grid_y, archetype=None):
         self.grid_x = grid_x
         self.grid_y = grid_y
-        self.hp = ENEMY_STATS["hp"]
-        self.max_ap = ENEMY_STATS["max_ap"]
-        self.ap = ENEMY_STATS["max_ap"]
-        self.strength = ENEMY_STATS["strength"]
+        self.archetype = archetype or random.choice(ENEMY_ARCHETYPES)
+        self.max_hp = self.archetype["hp"]
+        self.hp = self.max_hp
+        self.max_ap = self.archetype["max_ap"]
+        self.ap = self.max_ap
+        self.strength = self.archetype["strength"]
+        self.ranged = self.archetype["ranged"]
+        self.spellcaster = self.archetype["spellcaster"]
         self.frames = ASSETS["enemy"]
         self.can_open_doors = False
         self.flying = False
@@ -464,6 +564,9 @@ class Game:
         self.turn_count = 0
         self.turn_limit = BASE_TURN_LIMIT
         self.portal = None
+        self.map_index = 0
+        self.active_map_name = MAP_TEMPLATES[0]["name"]
+        self.spell_message = ""
         self.enemies = []
         self.obstacles = []
         self.structures = []
@@ -594,40 +697,137 @@ class Game:
         pygame.display.flip()
 
     # --- Global Map Setup (shared among players) ---
+    def place_obstacle_rects(self, rects, obs_type):
+        for x, y, w, h in rects:
+            self.obstacles.append(Obstacle(x, y, w, h, obs_type))
+
     def setup_world(self):
+        template = MAP_TEMPLATES[self.map_index % len(MAP_TEMPLATES)]
+        self.active_map_name = template["name"]
         self.obstacles = []
-        for _ in range(20):
-            x = random.randint(0, GRID_WIDTH - 1)
-            y = random.randint(0, GRID_HEIGHT - 1)
-            self.obstacles.append(Obstacle(x, y, 1, 1, "tree"))
-        for _ in range(10):
-            x = random.randint(0, GRID_WIDTH - 2)
-            y = random.randint(0, GRID_HEIGHT - 2)
-            self.obstacles.append(Obstacle(x, y, 2, 2, "building"))
-        for _ in range(5):
-            x = random.randint(0, GRID_WIDTH - 3)
-            y = random.randint(0, GRID_HEIGHT - 3)
-            self.obstacles.append(Obstacle(x, y, 3, 3, "swamp"))
+        self.place_obstacle_rects(template["trees"], "tree")
+        self.place_obstacle_rects(template["buildings"], "building")
+        self.place_obstacle_rects(template["swamps"], "swamp")
+
         self.structures = []
-        for _ in range(3):
-            w = random.randint(5, 10)
-            h = random.randint(5, 10)
-            x = random.randint(0, GRID_WIDTH - w)
-            y = random.randint(0, GRID_HEIGHT - h)
-            self.structures.append(Structure(x, y, w, h))
+        for sx, sy, sw, sh in template["structures"]:
+            self.structures.append(Structure(sx, sy, sw, sh))
+
         self.chests = []
-        for _ in range(5):
-            while True:
-                x = random.randint(0, GRID_WIDTH - 1)
-                y = random.randint(0, GRID_HEIGHT - 1)
-                if is_tile_walkable(x, y, self.obstacles, self.structures, flying=False):
-                    self.chests.append(Chest(x, y))
-                    break
+        for cx, cy in template["chests"]:
+            if is_tile_walkable(cx, cy, self.obstacles, self.structures, flying=False):
+                self.chests.append(Chest(cx, cy))
+
         self.enemies = []
-        for _ in range(ENEMY_SPAWN_BASE):
-            x = random.randint(0, GRID_WIDTH - 1)
-            y = random.randint(0, GRID_HEIGHT - 1)
-            self.enemies.append(Enemy(x, y))
+        stage_bonus = max(0, self.level - 1)
+        spawn_points = list(template["enemy_spawns"])
+        for i, (ex, ey) in enumerate(spawn_points):
+            archetype = ENEMY_ARCHETYPES[(i + self.level) % len(ENEMY_ARCHETYPES)]
+            if is_tile_walkable(ex, ey, self.obstacles, self.structures, flying=False):
+                enemy = Enemy(ex, ey, archetype=archetype)
+                enemy.max_hp += stage_bonus * 2
+                enemy.hp = enemy.max_hp
+                enemy.strength += stage_bonus // 2
+                self.enemies.append(enemy)
+
+    def get_tile_info(self, x, y):
+        for player in self.players:
+            for unit in player.player_units:
+                if unit.grid_x == x and unit.grid_y == y:
+                    label = "Wizard" if unit == player.wizard else unit.type
+                    return f"{label} HP:{unit.hp}"
+        for enemy in self.enemies:
+            if enemy.grid_x == x and enemy.grid_y == y:
+                return f"Enemy HP:{enemy.hp}"
+        for chest in self.chests:
+            if chest.grid_x == x and chest.grid_y == y:
+                return "Opened Chest" if chest.opened else "Chest"
+        for obs in self.obstacles:
+            if obs.grid_x <= x < obs.grid_x + obs.grid_width and obs.grid_y <= y < obs.grid_y + obs.grid_height:
+                return obs.type.title()
+        return "Grass"
+
+    def cast_spell(self, key, player):
+        spell = SPELLBOOK.get(key)
+        if not spell:
+            return
+        wizard = player.wizard
+        if player.player_units[player.current_unit_index] != wizard:
+            self.spell_message = "Select wizard to cast."
+            return
+        if wizard.ap <= 0:
+            self.spell_message = "No AP left."
+            return
+        if wizard.mana < spell["mana"]:
+            self.spell_message = "Not enough mana."
+            return
+
+        if spell["name"] == "Magic Bolt":
+            target = self.find_spell_target(wizard.grid_x, wizard.grid_y, spell["range"], player)
+            if not target:
+                self.spell_message = "No target for Magic Bolt."
+                return
+            wizard.mana -= spell["mana"]
+            wizard.ap -= 1
+            target.hp -= wizard.strength + player.spellcasting
+            self.attack_effects.append(AttackEffect(target.grid_x, target.grid_y))
+            if target.hp <= 0 and target in self.enemies:
+                self.enemies.remove(target)
+                player.gain_xp(XP_PER_ENEMY + 8)
+                self.exp += XP_PER_ENEMY
+            self.spell_message = "Magic Bolt cast!"
+        elif spell["name"] == "Heal":
+            wizard.mana -= spell["mana"]
+            wizard.ap -= 1
+            wizard.hp = min(wizard.max_hp, wizard.hp + 18 + player.spellcasting)
+            self.spell_message = "Heal cast."
+        elif spell["name"] == "Teleport":
+            dx, dy = random.randint(-spell["range"], spell["range"]), random.randint(-spell["range"], spell["range"])
+            tx = (wizard.grid_x + dx) % GRID_WIDTH
+            ty = (wizard.grid_y + dy) % GRID_HEIGHT
+            if not is_tile_walkable(tx, ty, self.obstacles, self.structures, wizard.flying):
+                self.spell_message = "Teleport fizzled."
+                return
+            wizard.mana -= spell["mana"]
+            wizard.ap -= 1
+            wizard.grid_x, wizard.grid_y = tx, ty
+            player.update_fog_for_unit(wizard)
+            self.spell_message = "Teleport success."
+        elif spell["name"] == "Fire Storm":
+            wizard.mana -= spell["mana"]
+            wizard.ap -= 1
+            for enemy in self.enemies[:]:
+                if grid_distance(wizard.grid_x, wizard.grid_y, enemy.grid_x, enemy.grid_y) <= spell["radius"] + 2:
+                    enemy.hp -= 8 + player.spellcasting
+                    self.attack_effects.append(AttackEffect(enemy.grid_x, enemy.grid_y))
+                    if enemy.hp <= 0:
+                        self.enemies.remove(enemy)
+                        player.gain_xp(XP_PER_ENEMY + 6)
+                        self.exp += XP_PER_ENEMY
+            self.spell_message = "Fire Storm cast."
+        elif spell["name"] == "Haste":
+            wizard.mana -= spell["mana"]
+            wizard.ap -= 1
+            player.haste_turns = 3
+            self.spell_message = "Haste active for 3 turns."
+
+    def find_spell_target(self, x, y, max_range, caster_player):
+        best_target = None
+        best_dist = 999
+        for enemy in self.enemies:
+            dist = grid_distance(x, y, enemy.grid_x, enemy.grid_y)
+            if dist <= max_range and dist < best_dist:
+                best_target = enemy
+                best_dist = dist
+        for player in self.players:
+            if player == caster_player:
+                continue
+            for unit in player.player_units:
+                dist = grid_distance(x, y, unit.grid_x, unit.grid_y)
+                if dist <= max_range and dist < best_dist:
+                    best_target = unit
+                    best_dist = dist
+        return best_target
 
     # --- Game State Methods ---
     def handle_game_events(self):
@@ -705,6 +905,8 @@ class Game:
                             self.attempt_spawn("Zombie", active_player)
                         elif event.key == pygame.K_7:
                             self.attempt_spawn("Bat", active_player)
+                        elif event.key in SPELLBOOK:
+                            self.cast_spell(event.key, active_player)
     
     def attempt_spawn(self, ally_type, player):
         if player.player_units[player.current_unit_index] != player.wizard:
@@ -734,43 +936,57 @@ class Game:
         if defender.hp <= 0:
             if defender in self.enemies:
                 reward = XP_PER_ENEMY + (defender.strength * 2)
+                player.gain_xp(reward)
                 self.exp += reward
                 self.enemies.remove(defender)
     
     def move_current_unit(self, dx, dy, player):
         unit = player.player_units[player.current_unit_index]
-        if unit.ap > 0:
-            new_x = (unit.grid_x + dx) % GRID_WIDTH
-            new_y = (unit.grid_y + dy) % GRID_HEIGHT
-            original_pos = (unit.grid_x, unit.grid_y)
-            target = self.get_target_at(new_x, new_y, player)
-            if target:
-                unit.ap -= 1
-                self.perform_attack(unit, target, original_pos, player)
-            elif is_tile_walkable(new_x, new_y, self.obstacles, self.structures, unit.flying):
-                blocked = False
-                for struct in self.structures:
-                    if struct.grid_x <= new_x < struct.grid_x + struct.width and struct.grid_y <= new_y < struct.grid_y + struct.height:
-                        local_x = new_x - struct.grid_x
-                        local_y = new_y - struct.grid_y
-                        if struct.tile_map[local_x][local_y] == "door_closed" and not unit.flying:
-                            blocked = True
-                        break
-                if not blocked:
-                    unit.grid_x = new_x
-                    unit.grid_y = new_y
-                    unit.ap -= 1
-                    # Update fog-of-war for the active player
-                    player.update_fog_for_unit(unit)
-                    if unit == player.wizard and self.portal and player.wizard.grid_x == self.portal.grid_x and player.wizard.grid_y == self.portal.grid_y:
-                        self.complete_level()
+        if unit.ap <= 0:
+            return
+        new_x = (unit.grid_x + dx) % GRID_WIDTH
+        new_y = (unit.grid_y + dy) % GRID_HEIGHT
+        original_pos = (unit.grid_x, unit.grid_y)
+        target = self.get_target_at(new_x, new_y, player)
+        if target:
+            unit.ap -= 1
+            self.perform_attack(unit, target, original_pos, player)
+            return
+        if not is_tile_walkable(new_x, new_y, self.obstacles, self.structures, unit.flying):
+            return
+        blocked = False
+        for struct in self.structures:
+            if struct.grid_x <= new_x < struct.grid_x + struct.width and struct.grid_y <= new_y < struct.grid_y + struct.height:
+                local_x = new_x - struct.grid_x
+                local_y = new_y - struct.grid_y
+                if struct.tile_map[local_x][local_y] == "door_closed" and not unit.flying:
+                    blocked = True
+                break
+        if blocked:
+            return
+        move_cost = movement_cost_for_tile(new_x, new_y, self.obstacles, unit.flying)
+        if player.haste_turns > 0:
+            move_cost = max(1, move_cost - 1)
+        if move_cost > unit.ap:
+            self.spell_message = "Not enough AP for terrain."
+            return
+        unit.grid_x = new_x
+        unit.grid_y = new_y
+        unit.ap -= move_cost
+        player.update_fog_for_unit(unit)
+        if unit == player.wizard and self.portal and player.wizard.grid_x == self.portal.grid_x and player.wizard.grid_y == self.portal.grid_y:
+            self.complete_level()
     
     def end_turn(self):
         self.turn_count += 1
         active_player = self.players[self.active_player_index]
-        active_player.wizard.mana = min(active_player.wizard.max_mana, active_player.wizard.mana + active_player.wizard.speed)
+        active_player.wizard.mana = min(active_player.wizard.max_mana, active_player.wizard.mana + active_player.wizard.speed + active_player.spellcasting)
         for unit in active_player.player_units:
             unit.reset_ap()
+            if active_player.haste_turns > 0:
+                unit.ap += 1
+        if active_player.haste_turns > 0:
+            active_player.haste_turns -= 1
         if self.turn_count >= self.turn_limit and self.portal is None:
             while True:
                 x = random.randint(0, GRID_WIDTH - 1)
@@ -786,55 +1002,94 @@ class Game:
         if self.active_player_index == 0:
             self.enemy_turn()
     
+    def get_nearest_enemy_target(self, enemy):
+        best_target = None
+        best_dist = 999
+        for player in self.players:
+            for unit in player.player_units:
+                dist = grid_distance(enemy.grid_x, enemy.grid_y, unit.grid_x, unit.grid_y)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_target = unit
+        return best_target, best_dist
+
     def enemy_turn(self):
         for enemy in self.enemies:
             for _ in range(enemy.ap):
-                target = None
-                if line_of_sight(enemy.grid_x, enemy.grid_y, self.players[self.active_player_index].wizard.grid_x, self.players[self.active_player_index].wizard.grid_y, self.obstacles):
-                    target = self.players[self.active_player_index].wizard
-                if target:
+                target, dist = self.get_nearest_enemy_target(enemy)
+                if not target:
+                    break
+
+                if enemy.spellcaster and dist <= 5 and random.random() < 0.35:
+                    target.hp -= (enemy.strength + 2)
+                    self.attack_effects.append(AttackEffect(target.grid_x, target.grid_y))
+                elif enemy.ranged and dist <= 4 and line_of_sight(enemy.grid_x, enemy.grid_y, target.grid_x, target.grid_y, self.obstacles):
+                    target.hp -= max(2, enemy.strength)
+                    self.attack_effects.append(AttackEffect(target.grid_x, target.grid_y))
+                else:
                     dx = 1 if enemy.grid_x < target.grid_x else -1 if enemy.grid_x > target.grid_x else 0
                     dy = 1 if enemy.grid_y < target.grid_y else -1 if enemy.grid_y > target.grid_y else 0
-                    if is_tile_walkable(enemy.grid_x + dx, enemy.grid_y + dy, self.obstacles, self.structures, enemy.flying):
-                        enemy.grid_x = (enemy.grid_x + dx) % GRID_WIDTH
-                        enemy.grid_y = (enemy.grid_y + dy) % GRID_HEIGHT
-                    if abs(enemy.grid_x - self.players[self.active_player_index].wizard.grid_x) <= 1 and abs(enemy.grid_y - self.players[self.active_player_index].wizard.grid_y) <= 1:
-                        self.players[self.active_player_index].wizard.hp -= enemy.strength
-                        if self.players[self.active_player_index].wizard.hp <= 0:
-                            self.game_over = True
+                    if abs(target.grid_x - enemy.grid_x) > GRID_WIDTH // 2:
+                        dx *= -1
+                    if abs(target.grid_y - enemy.grid_y) > GRID_HEIGHT // 2:
+                        dy *= -1
+
+                    candidate_steps = [(dx, 0), (0, dy), (dx, dy), random.choice([(1,0),(-1,0),(0,1),(0,-1)])]
+                    moved = False
+                    for sx, sy in candidate_steps:
+                        nx = (enemy.grid_x + sx) % GRID_WIDTH
+                        ny = (enemy.grid_y + sy) % GRID_HEIGHT
+                        if is_tile_walkable(nx, ny, self.obstacles, self.structures, enemy.flying):
+                            enemy.grid_x, enemy.grid_y = nx, ny
+                            moved = True
+                            break
+                    if not moved:
+                        continue
+
+                    if grid_distance(enemy.grid_x, enemy.grid_y, target.grid_x, target.grid_y) <= 1:
+                        target.hp -= enemy.strength
+                        self.attack_effects.append(AttackEffect(target.grid_x, target.grid_y))
+
+                if target.hp <= 0:
+                    for player in self.players:
+                        if target in player.player_units:
+                            if target == player.wizard:
+                                self.game_over = True
+                            else:
+                                player.player_units.remove(target)
+                            break
+                    if self.game_over:
                         break
-                else:
-                    dx, dy = random.choice([(1,0), (-1,0), (0,1), (0,-1)])
-                    if is_tile_walkable(enemy.grid_x + dx, enemy.grid_y + dy, self.obstacles, self.structures, enemy.flying):
-                        enemy.grid_x = (enemy.grid_x + dx) % GRID_WIDTH
-                        enemy.grid_y = (enemy.grid_y + dy) % GRID_HEIGHT
+            if self.game_over:
+                break
+
         for enemy in self.enemies:
             enemy.reset_ap()
-    
+
     def complete_level(self):
         bonus = XP_LEVEL_BONUS + (self.level * 2)
         self.exp += bonus
+        for player in self.players:
+            player.gain_xp(bonus // max(1, len(self.players)))
         if self.level >= MAX_LEVEL:
             self.game_win = True
-        else:
-            self.level += 1
-            self.turn_count = 0
-            self.portal = None
-            self.state = "EDITOR"
-            self.current_editor_player = 0
-            self.player_configs = []
-            for _ in range(self.num_players):
-                self.player_configs.append((copy.deepcopy(BASE_WIZARD_CONFIG), {"Imp":0, "Ogre":0, "Goblin":0, "Ghost":0, "Demon":0, "Zombie":0, "Bat":0}))
-            self.default_wizard = copy.deepcopy(BASE_WIZARD_CONFIG)
-            self.default_allies = {"Imp":0, "Ogre":0, "Goblin":0, "Ghost":0, "Demon":0, "Zombie":0, "Bat":0}
-            self.exp = 400
-            self.editor_index = 0
-            self.enemies = []
-            for _ in range(ENEMY_SPAWN_BASE + (self.level - 1) * 2):
-                x = random.randint(0, GRID_WIDTH - 1)
-                y = random.randint(0, GRID_HEIGHT - 1)
-                self.enemies.append(Enemy(x, y))
-    
+            return
+
+        self.level += 1
+        self.turn_count = 0
+        self.portal = None
+        self.map_index = (self.map_index + 1) % len(MAP_TEMPLATES)
+        self.setup_world()
+        for i, player in enumerate(self.players):
+            start_pos = get_start_pos(i, self.num_players)
+            player.wizard.grid_x, player.wizard.grid_y = start_pos
+            player.wizard.mana = player.wizard.max_mana
+            player.player_units = [player.wizard]
+            player.current_unit_index = 0
+            player.look_mode = False
+            player.explored = [[False for _ in range(GRID_HEIGHT)] for _ in range(GRID_WIDTH)]
+            player.update_fog_for_unit(player.wizard)
+
     def draw_game(self):
         # Center camera on active player's current unit.
         active_player = self.players[self.active_player_index]
@@ -1011,7 +1266,7 @@ class Game:
             extra = ""
         stats_lines = [
             f"Type: {unit_type}",
-            f"HP: {current_unit.hp}",
+            f"HP: {current_unit.hp}/{getattr(current_unit, 'max_hp', current_unit.hp)}",
             f"AP: {current_unit.ap}/{current_unit.max_ap}",
             f"Str: {getattr(current_unit, 'strength', '-')}",
             f"Spd: {getattr(current_unit, 'speed', '-')}",
@@ -1025,23 +1280,28 @@ class Game:
             look_text = self.font.render("LOOK: " + look_info, True, WHITE)
             self.screen.blit(look_text, (sidebar_rect.x + 10, 350))
         turn_text = self.font.render(f"Turn: {self.turn_count}/{self.turn_limit}", True, WHITE)
-        level_text = self.font.render(f"Level: {self.level}", True, WHITE)
-        xp_text = self.font.render(f"XP: {self.exp}", True, WHITE)
+        level_text = self.font.render(f"Stage: {self.level}", True, WHITE)
+        xp_text = self.font.render(f"Global XP: {self.exp}", True, WHITE)
+        wiz_lvl_text = self.font.render(f"Wizard Lvl: {active_player.level} XP:{active_player.xp}", True, WHITE)
+        map_text = self.font.render(f"Map: {self.active_map_name}", True, WHITE)
         self.screen.blit(turn_text, (sidebar_rect.x + 10, 375))
         self.screen.blit(level_text, (sidebar_rect.x + 10, 395))
         self.screen.blit(xp_text, (sidebar_rect.x + 10, 415))
+        self.screen.blit(wiz_lvl_text, (sidebar_rect.x + 10, 435))
+        self.screen.blit(map_text, (sidebar_rect.x + 10, 455))
         if self.portal:
             portal_text = self.font.render(f"Portal: {self.portal.countdown}", True, WHITE)
-            self.screen.blit(portal_text, (sidebar_rect.x + 10, 440))
+            self.screen.blit(portal_text, (sidebar_rect.x + 10, 475))
         controls = [
             "Arrows: Move/Attack",
             "TAB: Next Unit",
             "1-7: Spawn Ally",
+            "Z/X/C/V/B: Spells",
             "O: Open Chest",
             "L: Look Mode",
             "D: Toggle Door"
         ]
-        base_y = 450
+        base_y = 495
         for i, line in enumerate(controls):
             self.screen.blit(self.font.render(line, True, WHITE), (sidebar_rect.x + 10, base_y + i * 20))
         if all(unit.ap == 0 for unit in active_player.player_units):
@@ -1050,6 +1310,8 @@ class Game:
             flash_color = WHITE
         end_turn_text = self.font.render("E: End Turn", True, flash_color)
         self.screen.blit(end_turn_text, (sidebar_rect.x + 10, base_y + len(controls)*20))
+        if self.spell_message:
+            self.screen.blit(self.font.render(self.spell_message[:28], True, YELLOW), (10, GAME_VIEW_HEIGHT - 20))
     
     def run(self):
         while True:
