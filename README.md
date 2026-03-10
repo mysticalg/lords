@@ -13,6 +13,22 @@ python3 -m http.server 8000
 
 Then visit `http://localhost:8000`.
 
+## Automatic GitHub Pages deployment
+
+This repository includes a GitHub Actions workflow at
+`.github/workflows/deploy-pages.yml` that automatically publishes the game to
+GitHub Pages on every push to `main` or `master`.
+
+### One-time setup in GitHub
+
+1. Open **Settings → Pages** in your repository.
+2. Set **Source** to **GitHub Actions**.
+3. Push to `main`/`master` (or run the workflow manually from the **Actions** tab).
+
+After deployment, your game will be available at:
+
+- `https://<your-github-username>.github.io/<repo-name>/`
+
 ## Controls
 
 - Move: `WASD` or Arrow Keys
