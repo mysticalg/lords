@@ -1,12 +1,28 @@
-# Lords
+# Lords: HTML5 Edition
 
-This repository now includes a GitHub Actions workflow to package the game as a Windows `.exe` build.
+A lightweight turn-based fantasy tactics game that runs directly in the browser.
 
-## Build a Windows executable on GitHub
+## Run locally
 
-1. Push your branch to GitHub.
-2. Open the **Actions** tab.
-3. Run **Build Windows EXE** (or let it run automatically on pushes/PRs).
-4. Download the `lords-windows-exe` artifact from the workflow run.
+Because this project uses static HTML/CSS/JS, you can open `index.html` directly,
+or run a tiny local server:
 
-The artifact includes the packaged app under `dist/lords/` with all required `assets/` files bundled.
+```bash
+python3 -m http.server 8000
+```
+
+Then visit `http://localhost:8000`.
+
+## Controls
+
+- Move: `WASD` or Arrow Keys
+- Wait turn: `Wait` button
+- Cast spells: Bolt / Heal / Teleport buttons
+- Restart: `New Game`
+
+## Gameplay loop
+
+1. Move around the grid, open chests for mana and XP.
+2. Attack enemies in melee by walking into them.
+3. Use spells tactically to survive and clear the map.
+4. Win by defeating all enemies.

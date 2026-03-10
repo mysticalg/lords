@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lords: HTML5 Edition</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app" aria-label="Lords game container">
+    <section class="game-panel" aria-label="Game board">
+      <header class="panel-header">
+        <h1>Lords: HTML5 Edition</h1>
+        <button id="resetBtn" class="btn" title="Start a new run with full health, mana, and enemies">New Game</button>
+      </header>
+
+      <canvas id="gameCanvas" width="768" height="576" aria-label="Game map" role="img"></canvas>
+
+      <p class="legend">
+        <span>🧙 Wizard</span>
+        <span>👹 Enemy</span>
+        <span>⬛ Wall</span>
+        <span>🟫 Chest</span>
+      </p>
+    </section>
+
+    <aside class="hud" aria-label="Player controls and stats">
+      <section class="card">
+        <h2>Wizard Status</h2>
+        <div class="stat-row"><span>❤️ Health</span><strong id="healthStat"></strong></div>
+        <div class="stat-row"><span>🔷 Mana</span><strong id="manaStat"></strong></div>
+        <div class="stat-row"><span>✨ XP</span><strong id="xpStat"></strong></div>
+        <div class="stat-row"><span>🏆 Level</span><strong id="levelStat"></strong></div>
+      </section>
+
+      <section class="card">
+        <h2>Actions</h2>
+        <div class="button-grid">
+          <button id="waitBtn" class="btn" title="Skip your action and let enemies move">Wait</button>
+          <button id="boltBtn" class="btn icon-btn" title="Magic Bolt (6 mana): damages the nearest visible enemy">
+            <img src="assets/magic_bolt_icon.png" alt="Magic Bolt icon" />
+            Bolt
+          </button>
+          <button id="healBtn" class="btn icon-btn" title="Heal (8 mana): restore 18 health">
+            <img src="assets/healing_potion_icon.png" alt="Heal icon" />
+            Heal
+          </button>
+          <button id="teleportBtn" class="btn icon-btn" title="Teleport (10 mana): blink up to 3 tiles in any direction">
+            <img src="assets/teleport_icon.png" alt="Teleport icon" />
+            Teleport
+          </button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>How to play</h2>
+        <ul>
+          <li>Move with <kbd>WASD</kbd> or arrow keys.</li>
+          <li>Defeat all enemies to win the round.</li>
+          <li>Open chests by stepping on them for bonus mana + XP.</li>
+          <li>Each action advances enemy turns, so plan ahead.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Event Log</h2>
+        <div id="log" class="log" aria-live="polite"></div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
